@@ -45,7 +45,7 @@ By completing this lab, you will be able to:
 ## Prerequisites
 
 - Python 3.9+
-- Libraries: `pandas`, `numpy`, `scikit-learn`, `matplotlib`
+- Libraries: `pandas`, `numpy`, `scikit-learn`, `matplotlib`, `openpyxl`
 
 Install dependencies if needed:
 
