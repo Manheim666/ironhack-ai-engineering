@@ -24,7 +24,11 @@ You will work in a Jupyter Notebook using pandas for relational modeling, dictio
 
 - Fork this repository to your own GitHub account.
 - Clone your fork to your machine.
-- Make sure you have `pandas` and `numpy` installed.
+Install dependencies if needed:
+
+```bash
+pip install pandas numpy
+```
 
 ## Getting Started
 
