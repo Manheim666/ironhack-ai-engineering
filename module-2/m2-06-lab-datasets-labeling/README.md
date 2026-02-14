@@ -25,9 +25,8 @@ By the end of this lab you should be able to:
 
 ## Requirements
 
-- Fork this repository to your own GitHub account.
-- Clone your fork to your machine.
-- Work inside the cloned repository directory for all steps below.
+- Clone this repository to your machine (or download the scripts directly).
+- Work inside the cloned directory for all steps below.
 
 ---
 
@@ -217,50 +216,49 @@ Create a short report (3–4 pages, PDF or Markdown) that includes:
 **Feedback loop reflection:**
 - Imagine this dataset is deployed in a cat-detection product. Users can flag incorrect detections. How would that feedback improve the next version of the dataset? What is the feedback loop length?
 
-Save the report as `report.md` (or `report.pdf`) in the root of your submission.
+Save the report as `report.pdf` (or `report.md`).
 
 ---
 
 ## Submission
 
-### What to submit
+This lab does **not** use the standard fork-and-pull-request workflow. Instead, you upload your dataset to a shared Google Drive folder so the class can assemble the full combined dataset.
 
-Your repository should contain:
+### Step A: Upload your dataset to Google Drive
+
+Upload a folder named with your student ID to the shared class folder:
+
+**[Shared Google Drive folder](https://drive.google.com/drive/folders/1qeGvkaK7UkNMYoESQHxGbV4DRH8EgEb0?usp=sharing)**
+
+Your folder must have this exact structure:
 
 ```
-images/
-  <ImageID>.jpg       (100 image files)
-labels/
-  <ImageID>.txt       (100 label files, one per image)
-my_imageids.txt       (your 100 ImageIDs)
-report.md             (your analysis report)
+<YOUR_STUDENT_ID>/
+  images/
+    <ImageID>.jpg       (100 image files)
+  labels/
+    <ImageID>.txt       (100 label files, one per image)
+  my_imageids.txt       (your 100 ImageIDs)
+  report.pdf            (your analysis report)
 ```
 
 Every image must have a matching label file, even if the label file is empty.
 
+### Step B: Submit confirmation in the Student Portal
+
+Upload your `report.pdf` (or `report.md`) file in the Student Portal to confirm your submission.
+
 ### Definition of done (checklist)
 
-Before you submit, make sure:
+Before you upload, make sure:
 
 - [ ] `verify_yolo_dataset.py` prints **PASS** with zero missing images, zero missing labels, and zero bad lines.
 - [ ] Your `images/` folder contains exactly 100 `.jpg` files.
 - [ ] Your `labels/` folder contains exactly 100 `.txt` files.
 - [ ] Your report covers all four sections (metadata, tricky cases, bias analysis, feedback loop).
-- [ ] You have **not** committed the `openimages_v6/` CSV files (they are too large; add them to `.gitignore`).
-
-### How to submit (Git workflow)
-
-When you are done, make sure all changes are saved, then run:
-
-```bash
-git add .
-git commit -m "Solved m2-06 lab"
-git push -u origin HEAD
-```
-
-- Create a pull request from your fork.
-- Paste the link to your pull request in the Student Portal.
+- [ ] Your Google Drive folder is named with your student ID.
+- [ ] You have uploaded your report to the Student Portal.
 
 ## Evaluation Criteria
 
-Your work will be evaluated on completeness, correctness, and analysis quality. **Completeness** means all 100 images and labels are present and the verification script passes. **Correctness** means your YOLO labels are properly formatted and your ImageID partition is deterministic and non-overlapping. **Analysis quality** means your report provides thoughtful observations about tricky cases, bias, and feedback loops — not just surface-level descriptions.
+Your work will be evaluated on completeness, correctness, and analysis quality. **Completeness** means all 100 images and labels are present in Google Drive and the verification script passes. **Correctness** means your YOLO labels are properly formatted and your ImageID partition is deterministic and non-overlapping. **Analysis quality** means your report provides thoughtful observations about tricky cases, bias, and feedback loops — not just surface-level descriptions.
