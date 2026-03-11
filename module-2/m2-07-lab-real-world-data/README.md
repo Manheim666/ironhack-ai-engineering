@@ -76,7 +76,7 @@ print(f"\nFirst rows:\n{df.head()}")
 
 ---
 
-## Task 1: Data Profiling and Missing Values (~25 minutes)
+## Task 1: Data Profiling and Missing Values
 
 ### 1.1 — Profile the raw data
 
@@ -109,7 +109,7 @@ A profiling summary, a written classification of missing data types with evidenc
 
 ---
 
-## Task 2: Cleaning Invalid and Anomalous Records (~25 minutes)
+## Task 2: Cleaning Invalid and Anomalous Records
 
 ### 2.1 — Identify cancellations
 
@@ -142,7 +142,7 @@ A documented cleaning pipeline with before/after counts, justifications for each
 
 ---
 
-## Task 3: Categorical Data Challenges (~20 minutes)
+## Task 3: Categorical Data Challenges
 
 ### 3.1 — Analyze the Country column
 
@@ -170,7 +170,7 @@ Analysis of categorical columns, a strategy for rare and high-cardinality catego
 
 ---
 
-## Task 4: Class Imbalance — Predicting High-Value Customers (~25 minutes)
+## Task 4: Class Imbalance — Predicting High-Value Customers
 
 ### 4.1 — Engineer a binary target
 
@@ -213,7 +213,7 @@ Customer-level dataset, class distribution analysis, and resampling results with
 
 ---
 
-## Task 5: Data Leakage — Introduce, Detect, and Fix (~25 minutes)
+## Task 5: Data Leakage — Introduce, Detect, and Fix
 
 ### 5.1 — Intentionally introduce temporal leakage
 
