@@ -125,30 +125,6 @@ Create a comparison table with columns: `Statistic`, `Bootstrap Lower`, `Bootstr
 1. Are the two approaches giving similar intervals? Where do they diverge, if at all?
 2. For which statistic (mean vs. proportion vs. median) is the bootstrap approach especially useful, and why?
 
-### Task 4: Visualise the Bootstrap Distribution
-
-For **one** of the statistics from Task 2, create a polished plot that includes:
-
-1. A histogram (or KDE) of the 10 000 bootstrap estimates.
-2. Vertical dashed lines marking the lower and upper bounds of the 95 % CI.
-3. A vertical solid line marking the observed sample statistic.
-4. Clear axis labels, a title, and a legend.
-
-**Stretch goal:** Create a 1 × 3 subplot figure showing the bootstrap distributions for all three statistics side by side.
-
-Use `matplotlib` or `seaborn`. Make sure the figure is presentation-ready (appropriate font sizes, no overlapping labels).
-
-### Task 5: Write an Interpretation Paragraph
-
-In a Markdown cell, write a **3–5 sentence paragraph** that a non-technical stakeholder could understand. Your paragraph should:
-
-- State the point estimate and its 95 % CI.
-- Explain what the interval means in plain language (avoid "there is a 95 % probability that…" — use the frequentist interpretation).
-- Note whether the interval is wide or narrow and what that implies about the precision of the estimate.
-- Suggest one action or next step based on the result (e.g. "collect more data", "the effect is large enough to act on").
-
-**Tip:** Read your paragraph out loud. If it sounds like a stats textbook, rewrite it.
-
 ## Submission
 
 ### What to submit
@@ -160,8 +136,6 @@ In a Markdown cell, write a **3–5 sentence paragraph** that a non-technical st
 - [ ] `bootstrap_ci` function works correctly and is reusable (accepts any `stat_func`)
 - [ ] Bootstrap CIs computed for mean, median, and proportion
 - [ ] Normal-approximation CIs computed and compared in a summary table
-- [ ] At least one polished visualisation of the bootstrap distribution with CI bounds
-- [ ] Written interpretation paragraph in plain, non-technical language
 - [ ] Notebook runs top-to-bottom without errors (`Kernel → Restart & Run All`)
 
 ### How to submit (Git workflow)
