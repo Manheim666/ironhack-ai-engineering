@@ -2,6 +2,15 @@
 
 # Final Assessment | Cat Detection v2 — Improve, Export to ONNX, Containerise & Compete
 
+## Image for leaderboard
+
+```bash
+docker pull manheim666/cat-detector:final
+```
+
+Image: `manheim666/cat-detector:final`
+Student: Asif Habilov
+
 ## Overview
 
 This is the **final assessment** of Unit 6, and it has three parts that fit together:
@@ -333,9 +342,9 @@ A pull request on your fork containing:
 
   ```text
   ## Image for leaderboard
-  docker pull alicegarcia/cat-detector:final
-  Image: alicegarcia/cat-detector:final
-  Student: Alice Garcia
+  docker pull manheim666/cat-detector:final
+  Image: manheim666/cat-detector:final
+  Student: Asif Habilov
   ```
 
 ### Definition of done (checklist)
