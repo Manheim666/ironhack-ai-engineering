@@ -1,0 +1,24 @@
+{
+  "request_id": "5d4c3b2a-1f0e-4d9c-8b7a-6e5d4c3b2a1f",
+  "model_version": "mod-vit-2024.11.3",
+  "results": [
+    {
+      "id": "img-001",
+      "status": "ok",
+      "labels": [
+        { "label": "safe", "probability": 0.961 },
+        { "label": "violence", "probability": 0.021 },
+        { "label": "weapons", "probability": 0.018 }
+      ]
+    },
+    {
+      "id": "img-002",
+      "status": "error",
+      "error": {
+        "code": "invalid_image",
+        "message": "Image bytes could not be decoded.",
+        "request_id": "5d4c3b2a-1f0e-4d9c-8b7a-6e5d4c3b2a1f"
+      }
+    }
+  ]
+}

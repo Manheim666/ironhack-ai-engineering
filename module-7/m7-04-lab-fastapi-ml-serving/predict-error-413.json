@@ -1,0 +1,5 @@
+{
+  "code": "payload_too_large",
+  "message": "Image exceeds the 5 MB limit.",
+  "request_id": "c0ffee00-dead-4bee-8fed-0123456789ab"
+}
