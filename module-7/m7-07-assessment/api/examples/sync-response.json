@@ -1,0 +1,10 @@
+{
+  "user_id": "u_8812734",
+  "model_version": "ranker-1.4.2",
+  "cold_start": false,
+  "recommendations": [
+    { "product_id": "p_43321", "score": 0.8421, "rank": 1 },
+    { "product_id": "p_11984", "score": 0.7765, "rank": 2 },
+    { "product_id": "p_90017", "score": 0.7012, "rank": 3 }
+  ]
+}

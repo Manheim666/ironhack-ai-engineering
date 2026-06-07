@@ -1,0 +1,3 @@
+# Spectral ruleset for linting the API contract.
+# Extends Spectral's built-in OpenAPI ruleset (structural + style checks for OpenAPI 3.x).
+extends: ["spectral:oas"]

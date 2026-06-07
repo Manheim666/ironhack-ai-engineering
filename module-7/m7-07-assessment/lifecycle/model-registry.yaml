@@ -1,0 +1,129 @@
+# Model registry spec for the `ranker` model (Scenario X — recommendations).
+#
+# This is a *specification* of what the registry stores per model version and how stages/gates work,
+# not a live dump. One entry per trained model version. The shape below is what the CI pipeline writes
+# and what the promotion sign-off appends to.
+
+registry:
+  name: retail-recsys-registry
+  model: ranker
+  # Tag scheme used everywhere: {semver}-{git_sha8}. The serving header reports ranker-{semver}.
+  tag_scheme: "{semver}-{git_sha8}"
+
+  # Allowed lifecycle stages. See lifecycle/lifecycle.md for the gates between them.
+  stages: [candidate, staging, production, archived]
+
+  # Promotion requires BOTH approvers. CI's production job checks for these before deploying.
+  required_approvers:
+    - role: ml-lead
+    - role: serving-oncall-lead
+
+  # Gate thresholds — kept identical to the canary checks in monitoring/alerts.yaml on purpose.
+  gates:
+    offline_eval:                      # Gate 1
+      ndcg_at_10_min_vs_champion: -0.01   # no worse than champion - 1%
+      recall_at_100_min_vs_champion: -0.01
+      artifact_load_check: required
+    canary:                            # Gate 2
+      p95_latency_ms_max: 120
+      error_rate_max: 0.005
+      prediction_drift_psi_max: 0.2
+      canary_traffic_pct: 5
+      min_canary_minutes: 30
+
+# ---------------------------------------------------------------------------
+# Example entries (illustrative — shows the lineage fields every version must carry).
+# ---------------------------------------------------------------------------
+models:
+  - version: "1.4.2"
+    image_tag: "ranker:1.4.2-9f3a1c2d"      # what actually runs (model baked in — see ADR-0001)
+    model_version_header: "ranker-1.4.2"     # value of X-Model-Version in the API
+    stage: production
+    role: champion                           # the live A/B winner
+
+    lineage:
+      training_run_id: "train-2026-05-29-0461"
+      code_commit: "9f3a1c2d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8090"
+      dataset_snapshot: "events-2026-05-28"  # 30-day window snapshot used for training
+      feature_set_version: "fs-2026.05"      # must match what Redis is populated with at serve time
+      base_image: "python:3.12-slim@sha256:<pinned-digest>"
+      trained_by: "ml-team / a.hebilov"
+      framework: "lightgbm 4.3.0"
+      artifact_size_mb: 180
+
+    eval:                                    # the numbers that cleared Gate 1
+      ndcg_at_10: 0.412
+      recall_at_100: 0.638
+      eval_set: "holdout-2026-05-28"
+
+    promotion:                               # the audit trail written at Gate 3
+      approved_by:
+        - role: ml-lead
+          who: "ml-team / s.ng"
+          at: "2026-05-30T09:14:00Z"
+        - role: serving-oncall-lead
+          who: "serving / d.ferreira"
+          at: "2026-05-30T09:31:00Z"
+      promoted_at: "2026-05-30T09:35:00Z"
+
+    created_at: "2026-05-29T22:40:00Z"
+
+  - version: "1.5.0"
+    image_tag: "ranker:1.5.0-3b2a1f0e"
+    model_version_header: "ranker-1.5.0"
+    stage: staging                           # in canary, challenging 1.4.2
+    role: challenger
+
+    lineage:
+      training_run_id: "train-2026-06-04-0502"
+      code_commit: "3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8e7d6c5b4a"
+      dataset_snapshot: "events-2026-06-03"
+      feature_set_version: "fs-2026.05"
+      base_image: "python:3.12-slim@sha256:<pinned-digest>"
+      trained_by: "ml-team / a.hebilov"
+      framework: "lightgbm 4.3.0"
+      artifact_size_mb: 182
+
+    eval:
+      ndcg_at_10: 0.419                       # +0.7% vs champion — cleared Gate 1
+      recall_at_100: 0.641
+      eval_set: "holdout-2026-06-03"
+
+    promotion:
+      approved_by: []                         # not yet promoted — awaiting Gate 3 sign-off
+      promoted_at: null
+
+    created_at: "2026-06-04T23:05:00Z"
+
+  # The cold-start fallback is tracked here too, but moves on its own (slower) cadence.
+  - version: "fallback-2.1"
+    image_tag: "ranker:1.4.2-9f3a1c2d"        # shipped inside the same serving image
+    model_version_header: "fallback-2.1"
+    stage: production
+    role: fallback
+
+    lineage:
+      training_run_id: "popmodel-2026-05-15-0033"
+      code_commit: "9f3a1c2d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8090"
+      dataset_snapshot: "events-2026-05-14"
+      feature_set_version: "fs-2026.05"
+      base_image: "python:3.12-slim@sha256:<pinned-digest>"
+      trained_by: "ml-team / a.hebilov"
+      framework: "in-house popularity model"
+      artifact_size_mb: 6
+
+    eval:
+      coverage_segments: 0.98                 # share of cold-start segments with a usable fallback
+      eval_set: "cold-start-holdout-2026-05-14"
+
+    promotion:
+      approved_by:
+        - role: ml-lead
+          who: "ml-team / s.ng"
+          at: "2026-05-16T11:00:00Z"
+        - role: serving-oncall-lead
+          who: "serving / d.ferreira"
+          at: "2026-05-16T11:20:00Z"
+      promoted_at: "2026-05-16T11:25:00Z"
+
+    created_at: "2026-05-15T18:00:00Z"

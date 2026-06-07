@@ -1,0 +1,10 @@
+# Runtime deps for the ranker serving image. Pinned for reproducibility (the model is baked in, so the
+# whole image — code + deps + model — is one frozen, rollback-able unit per ADR-0001).
+fastapi==0.115.6
+gunicorn==23.0.0
+uvicorn==0.34.0
+numpy==2.2.1
+lightgbm==4.5.0
+redis==5.2.1
+pydantic==2.10.4
+prometheus-client==0.21.1
