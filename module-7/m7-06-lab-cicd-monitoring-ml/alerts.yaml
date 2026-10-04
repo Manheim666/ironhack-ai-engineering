@@ -1,0 +1,93 @@
+# Prometheus / Alertmanager alert rules for vision-moderation.
+# SLO baseline: availability objective 0.995 -> monthly error budget = 0.005.
+# page -> PagerDuty, ticket -> Linear.
+groups:
+  - name: vision-moderation-slo
+    rules:
+
+      # 1. Fast burn: 2% of the 30-day error budget in 1h. Multi-window
+      #    (1h AND 5m) so a brief blip doesn't page; both windows must be hot.
+      - alert: AvailabilityBurnFast
+        expr: |
+          (
+            sum(rate(http_requests_total{job="vision-moderation",code=~"5.."}[1h]))
+            /
+            sum(rate(http_requests_total{job="vision-moderation"}[1h]))
+          ) > (14.4 * (1 - 0.995))
+          and
+          (
+            sum(rate(http_requests_total{job="vision-moderation",code=~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total{job="vision-moderation"}[5m]))
+          ) > (14.4 * (1 - 0.995))
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "Availability error budget burning fast (2% in 1h)"
+          runbook: "https://runbooks.example.com/vision-moderation/availability-burn"
+
+      # 2. Slow burn: 10% of the 30-day error budget in 24h. Multi-window
+      #    (24h AND 1h) so we only ticket on a sustained slow leak.
+      - alert: AvailabilityBurnSlow
+        expr: |
+          (
+            sum(rate(http_requests_total{job="vision-moderation",code=~"5.."}[24h]))
+            /
+            sum(rate(http_requests_total{job="vision-moderation"}[24h]))
+          ) > (3 * (1 - 0.995))
+          and
+          (
+            sum(rate(http_requests_total{job="vision-moderation",code=~"5.."}[1h]))
+            /
+            sum(rate(http_requests_total{job="vision-moderation"}[1h]))
+          ) > (3 * (1 - 0.995))
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Availability error budget burning slowly (10% in 24h)"
+          runbook: "https://runbooks.example.com/vision-moderation/availability-burn"
+
+      # 3. p99 latency > 1s for 5 minutes.
+      - alert: LatencyP99High
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum(rate(http_request_duration_seconds_bucket{job="vision-moderation",path="/moderate"}[5m])) by (le)
+          ) > 1
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "p99 latency above 1s for 5m"
+          runbook: "https://runbooks.example.com/vision-moderation/latency-p99"
+
+      # 4. Input-feature drift: PSI > 0.2 on any major feature, sustained 1h.
+      - alert: DriftDetected
+        expr: |
+          max by (feature) (
+            feature_drift_psi{job="vision-moderation"}
+          ) > 0.2
+        for: 1h
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Input-feature drift (PSI > 0.2) on {{ $labels.feature }}"
+          runbook: "https://runbooks.example.com/vision-moderation/drift"
+
+      # 5. Model-version mismatch: a replica serves a model_version other than
+      #    the one the registry marks active, for 5m.
+      - alert: ModelVersionMismatch
+        expr: |
+          count(
+            served_model_version_info{job="vision-moderation"}
+            unless on (model_version)
+            registry_active_model_version{job="vision-moderation"}
+          ) > 0
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "Replica serving unexpected model_version vs registry"
+          runbook: "https://runbooks.example.com/vision-moderation/version-mismatch"
