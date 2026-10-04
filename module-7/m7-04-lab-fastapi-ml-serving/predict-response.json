@@ -1,0 +1,11 @@
+{
+  "request_id": "8a1f2e3d-4b5c-4d6e-8f90-1a2b3c4d5e6f",
+  "model_version": "mod-vit-2024.11.3",
+  "labels": [
+    { "label": "safe", "probability": 0.974 },
+    { "label": "violence", "probability": 0.012 },
+    { "label": "weapons", "probability": 0.008 },
+    { "label": "nudity", "probability": 0.004 },
+    { "label": "drugs", "probability": 0.002 }
+  ]
+}

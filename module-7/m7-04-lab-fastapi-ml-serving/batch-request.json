@@ -1,0 +1,19 @@
+{
+  "items": [
+    {
+      "id": "img-001",
+      "image": {
+        "content_type": "image/jpeg",
+        "image_base64": "/9j/4AAQSkZJRgABAQEAYABgAAD..."
+      },
+      "top_k": 3
+    },
+    {
+      "id": "img-002",
+      "image": {
+        "content_type": "image/png",
+        "image_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB..."
+      }
+    }
+  ]
+}

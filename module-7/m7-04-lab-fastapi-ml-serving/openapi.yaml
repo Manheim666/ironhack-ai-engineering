@@ -1,0 +1,630 @@
+openapi: 3.1.0
+info:
+  title: Vision Moderation as a Service API
+  version: 1.0.0
+  description: >
+    Public API for classifying uploaded images for prohibited content.
+    Multi-tenant: the tenant is derived from the API key, never sent in the body.
+    Inputs are images up to 5 MB (JPEG/PNG/WebP). The model returns the top K
+    calibrated labels (K configurable per request, 1-10, default 5). Model version
+    is included in every successful prediction response, in body and header.
+  contact:
+    name: Vision Moderation API Team
+    email: api@visionmod.io
+  license:
+    name: Proprietary
+    url: https://visionmod.io/license
+
+servers:
+  - url: https://api.visionmod.io
+    description: Production
+
+security:
+  - ApiKeyAuth: []
+
+tags:
+  - name: predict
+    description: Synchronous and async image moderation
+
+paths:
+  /v1/predict:
+    post:
+      tags: [predict]
+      operationId: predict
+      summary: Synchronous single-image moderation
+      description: >
+        Classifies a single image and returns the top K labels synchronously.
+        p95 latency target is 300 ms.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PredictRequest'
+            examples:
+              default:
+                $ref: '#/components/examples/PredictRequestExample'
+      responses:
+        '200':
+          description: Prediction succeeded.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-Model-Version:
+              $ref: '#/components/headers/X-Model-Version'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PredictResponse'
+              examples:
+                default:
+                  $ref: '#/components/examples/PredictResponseExample'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /v1/predict-batch:
+    post:
+      tags: [predict]
+      operationId: predictBatch
+      summary: Synchronous batch moderation (up to 32 images)
+      description: >
+        Classifies up to 32 images in one call. Each item is keyed by a
+        caller-supplied id. Results are keyed by that same id, never by input
+        order. Individual items can fail independently (partial failure).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchPredictRequest'
+            examples:
+              default:
+                $ref: '#/components/examples/BatchRequestExample'
+      responses:
+        '200':
+          description: >
+            Batch processed. Individual items may have failed; inspect each
+            item's status. A 200 means the batch was accepted and processed,
+            not that every item succeeded.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-Model-Version:
+              $ref: '#/components/headers/X-Model-Version'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchPredictResponse'
+              examples:
+                default:
+                  $ref: '#/components/examples/BatchResponseExample'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /v1/predict-async:
+    post:
+      tags: [predict]
+      operationId: predictAsync
+      summary: Submit a single image for asynchronous moderation
+      description: >
+        Accepts a single image and returns a job id immediately with 202.
+        Poll GET /v1/predictions/{job_id} for the result.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PredictRequest'
+            examples:
+              default:
+                $ref: '#/components/examples/PredictRequestExample'
+      responses:
+        '202':
+          description: Job accepted and queued.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AsyncSubmitResponse'
+              examples:
+                default:
+                  $ref: '#/components/examples/AsyncSubmitResponseExample'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /v1/predictions/{job_id}:
+    get:
+      tags: [predict]
+      operationId: getPrediction
+      summary: Fetch the result of an async moderation job
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          description: The job id returned by POST /v1/predict-async.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: >
+            Current job state. While queued or running, result is null. When
+            done, result holds the prediction. When failed, error is populated.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-Model-Version:
+              $ref: '#/components/headers/X-Model-Version'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AsyncResult'
+              examples:
+                done:
+                  $ref: '#/components/examples/AsyncResultDoneExample'
+                running:
+                  $ref: '#/components/examples/AsyncResultRunningExample'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: >
+        Tenant-scoped API key. The tenant is derived server-side from this key;
+        do not send a tenant id in the request body.
+
+  headers:
+    X-Request-ID:
+      description: Unique id for this request, for tracing and support.
+      required: true
+      schema:
+        type: string
+        format: uuid
+    X-Model-Version:
+      description: Version string of the model that produced the prediction.
+      required: true
+      schema:
+        type: string
+        examples: ['mod-vit-2024.11.3']
+
+  schemas:
+    ImageInput:
+      type: object
+      description: A single image payload plus its declared content type.
+      additionalProperties: false
+      required: [content_type, image_base64]
+      properties:
+        content_type:
+          type: string
+          description: MIME type of the image.
+          enum: [image/jpeg, image/png, image/webp]
+          examples: ['image/jpeg']
+        image_base64:
+          type: string
+          contentEncoding: base64
+          description: >
+            Base64-encoded image bytes. Decoded size must not exceed 5 MB
+            (5242880 bytes); larger payloads are rejected with 413.
+          examples: ['/9j/4AAQSkZJRgABAQEAYABgAAD...']
+
+    PredictRequest:
+      type: object
+      additionalProperties: false
+      required: [image]
+      properties:
+        image:
+          $ref: '#/components/schemas/ImageInput'
+        top_k:
+          type: integer
+          description: Number of top labels to return.
+          minimum: 1
+          maximum: 10
+          default: 5
+          examples: [5]
+
+    Label:
+      type: object
+      description: A single predicted label with a calibrated probability.
+      additionalProperties: false
+      required: [label, probability]
+      properties:
+        label:
+          type: string
+          description: Moderation category.
+          examples: ['safe', 'violence', 'nudity', 'weapons', 'drugs']
+        probability:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          description: Calibrated probability for this label.
+          examples: [0.974]
+
+    PredictResponse:
+      type: object
+      additionalProperties: false
+      required: [request_id, model_version, labels]
+      properties:
+        request_id:
+          type: string
+          format: uuid
+          description: Echo of X-Request-ID for correlation.
+        model_version:
+          type: string
+          description: Model version that produced this prediction.
+          examples: ['mod-vit-2024.11.3']
+        labels:
+          type: array
+          description: Top K labels, descending by probability.
+          minItems: 1
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/Label'
+
+    BatchItem:
+      type: object
+      description: One image in a batch, keyed by a caller-supplied id.
+      additionalProperties: false
+      required: [id, image]
+      properties:
+        id:
+          type: string
+          description: Caller-supplied unique id for this item within the batch.
+          maxLength: 128
+          examples: ['img-001']
+        image:
+          $ref: '#/components/schemas/ImageInput'
+        top_k:
+          type: integer
+          minimum: 1
+          maximum: 10
+          default: 5
+
+    BatchPredictRequest:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          description: Up to 32 images, each with a unique caller-supplied id.
+          minItems: 1
+          maxItems: 32
+          items:
+            $ref: '#/components/schemas/BatchItem'
+
+    BatchItemResult:
+      type: object
+      description: >
+        Result for one batch item. status is "ok" when labels are present,
+        "error" when the item failed independently (e.g. corrupt image).
+      additionalProperties: false
+      required: [id, status]
+      properties:
+        id:
+          type: string
+          description: Echoes the caller-supplied id from the request.
+          examples: ['img-001']
+        status:
+          type: string
+          enum: [ok, error]
+        labels:
+          type: array
+          description: Present when status is "ok".
+          minItems: 1
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/Label'
+        error:
+          description: Present when status is "error".
+          $ref: '#/components/schemas/Error'
+
+    BatchPredictResponse:
+      type: object
+      additionalProperties: false
+      required: [request_id, model_version, results]
+      properties:
+        request_id:
+          type: string
+          format: uuid
+        model_version:
+          type: string
+          examples: ['mod-vit-2024.11.3']
+        results:
+          type: array
+          description: >
+            One entry per input item, keyed by the caller-supplied id. Order is
+            not significant; match on id, not on position.
+          minItems: 1
+          maxItems: 32
+          items:
+            $ref: '#/components/schemas/BatchItemResult'
+
+    AsyncSubmitResponse:
+      type: object
+      additionalProperties: false
+      required: [job_id, status]
+      properties:
+        job_id:
+          type: string
+          format: uuid
+          description: Poll GET /v1/predictions/{job_id} with this id.
+        status:
+          type: string
+          enum: [queued]
+          description: A freshly submitted job always starts queued.
+
+    AsyncResult:
+      type: object
+      additionalProperties: false
+      required: [job_id, status]
+      properties:
+        job_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [queued, running, done, failed]
+        request_id:
+          type: string
+          format: uuid
+          description: Correlation id for this poll response.
+        model_version:
+          type: string
+          description: Present once the model has run (done).
+          examples: ['mod-vit-2024.11.3']
+        result:
+          description: Present and non-null only when status is "done".
+          oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/PredictResponse'
+        error:
+          description: Present only when status is "failed".
+          $ref: '#/components/schemas/Error'
+
+    Error:
+      type: object
+      description: Shared error envelope used by all error responses.
+      additionalProperties: false
+      required: [code, message, request_id]
+      properties:
+        code:
+          type: string
+          description: Stable machine-readable error code.
+          examples: ['payload_too_large', 'invalid_image', 'rate_limited']
+        message:
+          type: string
+          description: Human-readable explanation.
+          examples: ['Image exceeds the 5 MB limit.']
+        request_id:
+          type: string
+          format: uuid
+          description: Echo of X-Request-ID for support correlation.
+
+  responses:
+    BadRequest:
+      description: Malformed request (bad JSON, missing required fields).
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/X-Request-ID'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            default:
+              value:
+                code: bad_request
+                message: Request body is not valid JSON.
+                request_id: 3f1c2b9e-7a4d-4c1e-9a2b-8e7d6c5b4a31
+    Unauthorized:
+      description: Missing or invalid API key.
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/X-Request-ID'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            default:
+              value:
+                code: unauthorized
+                message: Missing or invalid X-API-Key header.
+                request_id: 6b2d8f04-1c3a-4e5b-9d7f-2a1b0c9e8d7f
+    PayloadTooLarge:
+      description: Image exceeds the 5 MB limit.
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/X-Request-ID'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            default:
+              $ref: '#/components/examples/Error413Example'
+    UnprocessableEntity:
+      description: >
+        Request was well-formed but semantically invalid (e.g. top_k out of
+        range, unsupported content_type, undecodable base64).
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/X-Request-ID'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            default:
+              value:
+                code: unprocessable_entity
+                message: top_k must be between 1 and 10.
+                request_id: 9c4e1a7b-2d6f-4b8c-a1e3-5f7d9b2c4e60
+    TooManyRequests:
+      description: Rate limit exceeded for this tenant.
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/X-Request-ID'
+        Retry-After:
+          description: Seconds to wait before retrying.
+          schema:
+            type: integer
+            examples: [2]
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            default:
+              value:
+                code: rate_limited
+                message: Rate limit exceeded. Retry after 2 seconds.
+                request_id: 1a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9
+    ServiceUnavailable:
+      description: Model backend temporarily unavailable; retry later.
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/X-Request-ID'
+        Retry-After:
+          description: Seconds to wait before retrying.
+          schema:
+            type: integer
+            examples: [5]
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            default:
+              value:
+                code: service_unavailable
+                message: Model backend is temporarily unavailable.
+                request_id: 7e8d9c0b-1a2f-43b4-95c6-d7e8f9a0b1c2
+    NotFound:
+      description: No job exists for the given job_id (or it has expired).
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/X-Request-ID'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            default:
+              value:
+                code: not_found
+                message: No job found for the given job_id.
+                request_id: 2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f
+
+  examples:
+    PredictRequestExample:
+      summary: Single image, top 5 labels
+      value:
+        image:
+          content_type: image/jpeg
+          image_base64: '/9j/4AAQSkZJRgABAQEAYABgAAD...'
+        top_k: 5
+    PredictResponseExample:
+      summary: A safe-image prediction
+      value:
+        request_id: 8a1f2e3d-4b5c-4d6e-8f90-1a2b3c4d5e6f
+        model_version: mod-vit-2024.11.3
+        labels:
+          - label: safe
+            probability: 0.974
+          - label: violence
+            probability: 0.012
+          - label: weapons
+            probability: 0.008
+          - label: nudity
+            probability: 0.004
+          - label: drugs
+            probability: 0.002
+    Error413Example:
+      summary: Payload too large
+      value:
+        code: payload_too_large
+        message: Image exceeds the 5 MB limit.
+        request_id: c0ffee00-dead-4bee-8fed-0123456789ab
+    BatchRequestExample:
+      summary: Two images keyed by caller id
+      value:
+        items:
+          - id: img-001
+            image:
+              content_type: image/jpeg
+              image_base64: '/9j/4AAQSkZJRgABAQEAYABgAAD...'
+            top_k: 3
+          - id: img-002
+            image:
+              content_type: image/png
+              image_base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB...'
+    BatchResponseExample:
+      summary: One success, one per-item failure
+      value:
+        request_id: 5d4c3b2a-1f0e-4d9c-8b7a-6e5d4c3b2a1f
+        model_version: mod-vit-2024.11.3
+        results:
+          - id: img-001
+            status: ok
+            labels:
+              - label: safe
+                probability: 0.961
+              - label: violence
+                probability: 0.021
+              - label: weapons
+                probability: 0.018
+          - id: img-002
+            status: error
+            error:
+              code: invalid_image
+              message: Image bytes could not be decoded.
+              request_id: 5d4c3b2a-1f0e-4d9c-8b7a-6e5d4c3b2a1f
+    AsyncSubmitResponseExample:
+      summary: Job accepted
+      value:
+        job_id: 11111111-2222-4333-8444-555555555555
+        status: queued
+    AsyncResultDoneExample:
+      summary: Completed async job
+      value:
+        job_id: 11111111-2222-4333-8444-555555555555
+        status: done
+        request_id: 99999999-8888-4777-8666-555555555555
+        model_version: mod-vit-2024.11.3
+        result:
+          request_id: 99999999-8888-4777-8666-555555555555
+          model_version: mod-vit-2024.11.3
+          labels:
+            - label: safe
+              probability: 0.943
+            - label: nudity
+              probability: 0.031
+    AsyncResultRunningExample:
+      summary: Job still running
+      value:
+        job_id: 11111111-2222-4333-8444-555555555555
+        status: running
+        request_id: 77777777-6666-4555-8444-333333333333
+        result: null
