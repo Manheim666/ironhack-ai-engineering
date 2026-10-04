@@ -1,0 +1,19 @@
+{
+  "submit_request": {
+    "user_segment": "all_active",
+    "num_results": 20,
+    "callback_url": "https://hooks.example.com/recsys/jobdone"
+  },
+  "accepted_response": {
+    "job_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "status": "accepted",
+    "poll_url": "https://api.example.com/v1/jobs/7c9e6679-7425-40de-944b-e07fc1f90ae7"
+  },
+  "status_succeeded": {
+    "job_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "status": "succeeded",
+    "model_version": "ranker-1.4.2",
+    "progress": 1.0,
+    "result_url": "https://results.example.com/jobs/7c9e6679.json"
+  }
+}

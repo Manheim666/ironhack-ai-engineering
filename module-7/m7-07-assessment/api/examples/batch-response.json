@@ -1,0 +1,26 @@
+{
+  "model_version": "ranker-1.4.2",
+  "results": [
+    {
+      "user_id": "u_8812734",
+      "cold_start": false,
+      "recommendations": [
+        { "product_id": "p_43321", "score": 0.8421, "rank": 1 }
+      ]
+    },
+    {
+      "user_id": "u_0000001",
+      "cold_start": true,
+      "recommendations": [
+        { "product_id": "p_55501", "score": 0.5102, "rank": 1 }
+      ]
+    },
+    {
+      "user_id": "u_does_not_exist",
+      "error": {
+        "code": "user_not_found",
+        "message": "No such user."
+      }
+    }
+  ]
+}

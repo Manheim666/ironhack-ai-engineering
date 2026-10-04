@@ -1,0 +1,180 @@
+# CI/CD for the ranker serving image (Scenario X).
+#
+# Reads top to bottom as the model's path to production:
+#   lint+test -> build & bake model -> scan -> push -> deploy staging (canary) -> [gate] -> deploy prod
+#
+# Jobs are dependency-chained with `needs:` so a failure stops everything downstream — nothing ships
+# past a red step. Production is gated on a protected environment that requires the two named approvers
+# from the lifecycle doc (ML lead + serving on-call lead).
+#
+# Image tag is {semver}-{git_sha8}, the same scheme the registry stores and the rollback runbook uses.
+
+name: deploy-model
+
+on:
+  push:
+    tags:
+      - "v*.*.*"          # a release tag (e.g. v1.5.0) kicks off the pipeline
+  workflow_dispatch:       # allow a manual run (e.g. redeploy a known-good tag)
+    inputs:
+      model_version:
+        description: "Model version to bake (must exist in the registry)"
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write          # for keyless auth to the cloud / registry (OIDC)
+
+env:
+  IMAGE_NAME: ghcr.io/example/ranker
+  MODEL_VERSION: ${{ inputs.model_version || '1.5.0' }}
+
+jobs:
+
+  # 1) Fast feedback: lint the spec + code, run unit tests. Cheap, runs first, blocks everything.
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint OpenAPI spec
+        # The API contract must stay lint-clean — a broken spec fails the build here, not in review.
+        run: npx --yes @stoplight/spectral-cli lint api/openapi.yaml
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: pip install -r container/requirements.txt -r requirements-dev.txt
+
+      - name: Unit tests
+        run: pytest -q
+
+  # 2) Build the image with the model baked in (ADR-0001). Depends on tests passing.
+  build:
+    needs: lint-and-test
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.image_tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute image tag ({semver}-{git_sha8})
+        id: meta
+        run: |
+          SEMVER="${MODEL_VERSION}"
+          SHA8="$(git rev-parse --short=8 HEAD)"
+          echo "image_tag=${SEMVER}-${SHA8}" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch model artifact from registry
+        # Pull the exact model version so it can be baked. Fails the build if it isn't there.
+        run: ./scripts/fetch-model.sh "${MODEL_VERSION}" ./models
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (not pushed yet — scan first)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: container/Dockerfile
+          load: true
+          push: false
+          tags: ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.image_tag }}
+          build-args: |
+            MODEL_VERSION=${{ env.MODEL_VERSION }}
+
+      - name: Save image for the scan job
+        run: docker save "${IMAGE_NAME}:${{ steps.meta.outputs.image_tag }}" -o /tmp/image.tar
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: image
+          path: /tmp/image.tar
+
+  # 3) Security scan. Image must pass before it's allowed anywhere near a push.
+  scan:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: image
+          path: /tmp
+
+      - name: Load image
+        run: docker load -i /tmp/image.tar
+
+      - name: Trivy scan (fail on HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          input: /tmp/image.tar
+          severity: HIGH,CRITICAL
+          exit-code: "1"          # a high/critical CVE fails the pipeline
+
+  # 4) Push the scanned image. Only after lint+test+build+scan are all green.
+  push:
+    needs: [build, scan]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: image
+          path: /tmp
+
+      - name: Load image
+        run: docker load -i /tmp/image.tar
+
+      - name: Log in to registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push
+        run: docker push "${IMAGE_NAME}:${{ needs.build.outputs.image_tag }}"
+
+  # 5) Deploy to STAGING as a canary (Gate 2 in the lifecycle). Automated, no human gate yet.
+  deploy-staging:
+    needs: [build, push]
+    runs-on: ubuntu-latest
+    environment: staging      # staging env — no required reviewers
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy canary (5% traffic)
+        run: ./scripts/deploy.sh staging "${{ needs.build.outputs.image_tag }}" --canary 5
+
+      - name: Wait out canary + check SLOs
+        # Watches p95 latency, 5xx, and prediction drift against the same thresholds as the registry
+        # canary gate and the production alerts. Non-zero exit if the canary is unhealthy.
+        run: ./scripts/check-canary.sh staging "${{ needs.build.outputs.image_tag }}" --min-minutes 30
+
+  # 6) Deploy to PRODUCTION. Gated on a protected environment that requires the two named approvers
+  #    (ML lead + serving on-call lead — Gate 3 in the lifecycle). The job won't start until both
+  #    approve in the GitHub environment, which is also where the audit trail lives.
+  deploy-production:
+    needs: [build, deploy-staging]
+    runs-on: ubuntu-latest
+    environment: production   # protected: required reviewers = ml-lead, serving-oncall-lead
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy (rolling)
+        run: ./scripts/deploy.sh production "${{ needs.build.outputs.image_tag }}" --strategy rolling
+
+      - name: Post-deploy verification
+        # Confirms the new pods report the expected X-Model-Version and pass readiness before we
+        # consider the deploy done. Feeds the same signal the version-mismatch alert watches.
+        run: ./scripts/verify-deploy.sh production "${{ env.MODEL_VERSION }}"
+
+      - name: Record promotion in registry
+        # Writes the promotion block (approvers, timestamp) back to the model registry entry.
+        run: ./scripts/record-promotion.sh "${MODEL_VERSION}" "${{ needs.build.outputs.image_tag }}"

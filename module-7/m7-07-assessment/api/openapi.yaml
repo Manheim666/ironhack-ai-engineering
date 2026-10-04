@@ -1,0 +1,679 @@
+openapi: 3.1.0
+
+info:
+  title: Retail Recommendations API
+  version: 1.4.2
+  summary: Personalized in-app product recommendations (Scenario X).
+  description: |
+    Serves personalized product recommendations for a mobile retail app.
+
+    Three shapes of endpoint:
+      - **sync**  (`POST /v1/recommendations`)      — the home-screen hot path, < 120 ms p95.
+      - **batch** (`POST /v1/recommendations:batch`) — score many users in one call (offline / jobs).
+      - **async** (`POST /v1/recommendations:async`) — submit a large job, poll for the result.
+
+    Every successful response carries `X-Model-Version` (which model served it) and `X-Request-Id`
+    (for tracing). The version header is what makes A/B attribution and the model-version-mismatch
+    alert possible — see ../monitoring/alerts.yaml.
+  contact:
+    name: Recsys serving team
+    email: serving@example.com
+  license:
+    name: Proprietary
+    url: https://example.com/license
+
+servers:
+  - url: https://api.example.com
+    description: Production
+
+tags:
+  - name: recommendations
+    description: Get product recommendations for users.
+  - name: jobs
+    description: Async job submission and status.
+  - name: health
+    description: Liveness and readiness probes.
+
+paths:
+  /v1/recommendations:
+    post:
+      tags: [recommendations]
+      operationId: getRecommendations
+      summary: Get recommendations for a single user (synchronous).
+      description: |
+        The home-screen call. Returns the top-N ranked products for one user.
+        Cold-start users (no history) are served by the fallback model; the response
+        `X-Model-Version` will reflect that (e.g. `fallback-2.1`).
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecommendationRequest'
+            examples:
+              default:
+                $ref: '#/components/examples/SyncRequestExample'
+      responses:
+        '200':
+          description: Recommendations produced.
+          headers:
+            X-Model-Version:
+              $ref: '#/components/headers/XModelVersion'
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecommendationResponse'
+              examples:
+                default:
+                  $ref: '#/components/examples/SyncResponseExample'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/recommendations:batch:
+    post:
+      tags: [recommendations]
+      operationId: getRecommendationsBatch
+      summary: Get recommendations for many users in one call (synchronous batch).
+      description: |
+        Scores up to 500 users per call. Each user is resolved independently — a failure for one user
+        is reported in that user's result, it does not fail the whole batch.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchRecommendationRequest'
+            examples:
+              default:
+                $ref: '#/components/examples/BatchRequestExample'
+      responses:
+        '200':
+          description: Batch processed (individual items may carry per-user errors).
+          headers:
+            X-Model-Version:
+              $ref: '#/components/headers/XModelVersion'
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchRecommendationResponse'
+              examples:
+                default:
+                  $ref: '#/components/examples/BatchResponseExample'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/recommendations:async:
+    post:
+      tags: [jobs]
+      operationId: submitRecommendationJob
+      summary: Submit a large recommendation job (asynchronous).
+      description: |
+        For jobs too large for a synchronous call (e.g. score the whole active-user base). Returns
+        202 with a job id; poll `GET /v1/jobs/{jobId}` for status and the result location.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AsyncJobRequest'
+            examples:
+              default:
+                $ref: '#/components/examples/AsyncRequestExample'
+      responses:
+        '202':
+          description: Job accepted.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            Location:
+              description: URL to poll for job status.
+              schema:
+                type: string
+                format: uri
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobAccepted'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /v1/jobs/{jobId}:
+    get:
+      tags: [jobs]
+      operationId: getJobStatus
+      summary: Poll the status of an async job.
+      description: |
+        Returns the current state of a previously submitted async job (`accepted`, `running`,
+        `succeeded`, or `failed`). When `succeeded`, the response includes `result_url` to fetch the
+        scored output. Poll this until the job leaves the `running` state, or supply a `callback_url`
+        on submit to be notified instead.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - name: jobId
+          in: path
+          required: true
+          description: The job id returned by the async submit call.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Current job status.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobStatus'
+              examples:
+                running:
+                  $ref: '#/components/examples/JobStatusRunningExample'
+                succeeded:
+                  $ref: '#/components/examples/JobStatusSucceededExample'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /healthz:
+    get:
+      tags: [health]
+      operationId: liveness
+      summary: Liveness probe.
+      description: Process is up. Does not check downstream dependencies.
+      responses:
+        '200':
+          description: Alive.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+
+  /readyz:
+    get:
+      tags: [health]
+      operationId: readiness
+      summary: Readiness probe.
+      description: |
+        Ready to serve: the baked model loaded and the feature store is reachable. A pod that fails
+        this is pulled from rotation by the load balancer.
+      responses:
+        '200':
+          description: Ready.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+components:
+
+  parameters:
+    RequestId:
+      name: X-Request-Id
+      in: header
+      required: false
+      description: |
+        Client-supplied trace id. If omitted, the server generates one and returns it. Echoed on every
+        response so a single request can be followed across logs and traces.
+      schema:
+        type: string
+        format: uuid
+
+  headers:
+    XModelVersion:
+      description: |
+        The model version that produced this response, e.g. `ranker-1.4.2` or `fallback-2.1`. Used for
+        A/B attribution and watched by the model-version-mismatch alert.
+      schema:
+        type: string
+        examples: ["ranker-1.4.2"]
+    XRequestId:
+      description: The trace id for this request (echoed or server-generated).
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+
+    RecommendationRequest:
+      type: object
+      additionalProperties: false
+      required: [user_id]
+      properties:
+        user_id:
+          type: string
+          description: Stable user identifier. An unknown user triggers the cold-start fallback.
+          minLength: 1
+          maxLength: 64
+        num_results:
+          type: integer
+          description: How many recommendations to return.
+          minimum: 1
+          maximum: 100
+          default: 20
+        context:
+          $ref: '#/components/schemas/RequestContext'
+
+    RequestContext:
+      type: object
+      additionalProperties: false
+      description: Optional request-time signals that can sharpen ranking.
+      properties:
+        surface:
+          type: string
+          description: Where the recommendations render.
+          enum: [home, search, cart, pdp]
+          default: home
+        platform:
+          type: string
+          enum: [ios, android, web]
+        locale:
+          type: string
+          examples: ["en-GB"]
+
+    RecommendationResponse:
+      type: object
+      additionalProperties: false
+      required: [user_id, model_version, recommendations]
+      properties:
+        user_id:
+          type: string
+        model_version:
+          type: string
+          description: Same value as the X-Model-Version header. Duplicated in-body for convenience.
+          examples: ["ranker-1.4.2"]
+        cold_start:
+          type: boolean
+          description: True when the fallback model served this user.
+          default: false
+        recommendations:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecommendedItem'
+
+    RecommendedItem:
+      type: object
+      additionalProperties: false
+      required: [product_id, score, rank]
+      properties:
+        product_id:
+          type: string
+        score:
+          type: number
+          format: float
+          description: Ranking score (higher = more relevant). Not a probability.
+        rank:
+          type: integer
+          minimum: 1
+
+    BatchRecommendationRequest:
+      type: object
+      additionalProperties: false
+      required: [users]
+      properties:
+        users:
+          type: array
+          description: Up to 500 users to score in this call.
+          minItems: 1
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/RecommendationRequest'
+
+    BatchRecommendationResponse:
+      type: object
+      additionalProperties: false
+      required: [model_version, results]
+      properties:
+        model_version:
+          type: string
+          examples: ["ranker-1.4.2"]
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/BatchResultItem'
+
+    BatchResultItem:
+      type: object
+      additionalProperties: false
+      required: [user_id]
+      description: |
+        One per requested user. Carries either `recommendations` (success) or `error` (this user
+        failed) — never both. A per-user failure does not fail the batch.
+      properties:
+        user_id:
+          type: string
+        cold_start:
+          type: boolean
+          default: false
+        recommendations:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecommendedItem'
+        error:
+          $ref: '#/components/schemas/Error'
+
+    AsyncJobRequest:
+      type: object
+      additionalProperties: false
+      required: [user_segment]
+      properties:
+        user_segment:
+          type: string
+          description: Named segment to score (e.g. an audience or "all_active").
+          examples: ["all_active"]
+        num_results:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+        callback_url:
+          type: string
+          format: uri
+          description: Optional webhook to notify on completion instead of polling.
+
+    JobAccepted:
+      type: object
+      additionalProperties: false
+      required: [job_id, status]
+      properties:
+        job_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [accepted]
+        poll_url:
+          type: string
+          format: uri
+
+    JobStatus:
+      type: object
+      additionalProperties: false
+      required: [job_id, status]
+      properties:
+        job_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [accepted, running, succeeded, failed]
+        model_version:
+          type: string
+          description: Set once the job starts scoring.
+          examples: ["ranker-1.4.2"]
+        progress:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+        result_url:
+          type: string
+          format: uri
+          description: Where to fetch results when status is `succeeded`.
+        error:
+          $ref: '#/components/schemas/Error'
+
+    Health:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+        model_version:
+          type: string
+          examples: ["ranker-1.4.2"]
+
+    Error:
+      type: object
+      additionalProperties: false
+      description: Structured error. Same shape everywhere an error can occur.
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Stable, machine-readable error code.
+          enum:
+            - bad_request
+            - validation_failed
+            - user_not_found
+            - rate_limited
+            - internal_error
+            - service_unavailable
+            - not_found
+        message:
+          type: string
+          description: Human-readable explanation. Safe to log, not meant for end users verbatim.
+        request_id:
+          type: string
+          format: uuid
+          description: The trace id, so an error can be correlated with logs.
+        details:
+          type: array
+          description: Optional field-level detail, e.g. which input failed validation.
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              field:
+                type: string
+              issue:
+                type: string
+
+  responses:
+    BadRequest:
+      description: Malformed request.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            badRequest:
+              value:
+                code: bad_request
+                message: "Request body is not valid JSON."
+                request_id: "0f8c1d2e-3a4b-5c6d-7e8f-9a0b1c2d3e4f"
+    UnprocessableEntity:
+      description: Request is well-formed but failed validation.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            validation:
+              value:
+                code: validation_failed
+                message: "num_results must be between 1 and 100."
+                request_id: "0f8c1d2e-3a4b-5c6d-7e8f-9a0b1c2d3e4f"
+                details:
+                  - field: num_results
+                    issue: "must be <= 100"
+    TooManyRequests:
+      description: Rate limit exceeded.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        Retry-After:
+          description: Seconds to wait before retrying.
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            rateLimited:
+              value:
+                code: rate_limited
+                message: "Too many requests."
+                request_id: "0f8c1d2e-3a4b-5c6d-7e8f-9a0b1c2d3e4f"
+    NotFound:
+      description: Resource not found.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            notFound:
+              value:
+                code: not_found
+                message: "Job not found."
+                request_id: "0f8c1d2e-3a4b-5c6d-7e8f-9a0b1c2d3e4f"
+    InternalError:
+      description: Unexpected server error.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            internal:
+              value:
+                code: internal_error
+                message: "Something went wrong on our side."
+                request_id: "0f8c1d2e-3a4b-5c6d-7e8f-9a0b1c2d3e4f"
+    ServiceUnavailable:
+      description: Not ready / a dependency is down (e.g. feature store unreachable).
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        Retry-After:
+          description: Seconds to wait before retrying.
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            unavailable:
+              value:
+                code: service_unavailable
+                message: "Feature store is unreachable; try again shortly."
+                request_id: "0f8c1d2e-3a4b-5c6d-7e8f-9a0b1c2d3e4f"
+
+  examples:
+    SyncRequestExample:
+      summary: Single-user home-screen request.
+      value:
+        user_id: "u_8812734"
+        num_results: 10
+        context:
+          surface: home
+          platform: ios
+          locale: en-GB
+    SyncResponseExample:
+      summary: Ranked recommendations for a known user.
+      value:
+        user_id: "u_8812734"
+        model_version: "ranker-1.4.2"
+        cold_start: false
+        recommendations:
+          - product_id: "p_43321"
+            score: 0.8421
+            rank: 1
+          - product_id: "p_11984"
+            score: 0.7765
+            rank: 2
+          - product_id: "p_90017"
+            score: 0.7012
+            rank: 3
+    BatchRequestExample:
+      summary: Score three users at once.
+      value:
+        users:
+          - user_id: "u_8812734"
+            num_results: 5
+          - user_id: "u_0000001"
+            num_results: 5
+          - user_id: "u_does_not_exist"
+            num_results: 5
+    BatchResponseExample:
+      summary: Mixed result — one cold-start, one per-user error.
+      value:
+        model_version: "ranker-1.4.2"
+        results:
+          - user_id: "u_8812734"
+            cold_start: false
+            recommendations:
+              - product_id: "p_43321"
+                score: 0.8421
+                rank: 1
+          - user_id: "u_0000001"
+            cold_start: true
+            recommendations:
+              - product_id: "p_55501"
+                score: 0.5102
+                rank: 1
+          - user_id: "u_does_not_exist"
+            error:
+              code: user_not_found
+              message: "No such user."
+    AsyncRequestExample:
+      summary: Score an entire segment offline.
+      value:
+        user_segment: "all_active"
+        num_results: 20
+        callback_url: "https://hooks.example.com/recsys/jobdone"
+    JobStatusRunningExample:
+      summary: Job still running.
+      value:
+        job_id: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+        status: running
+        model_version: "ranker-1.4.2"
+        progress: 0.42
+    JobStatusSucceededExample:
+      summary: Job finished, result ready.
+      value:
+        job_id: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+        status: succeeded
+        model_version: "ranker-1.4.2"
+        progress: 1.0
+        result_url: "https://results.example.com/jobs/7c9e6679.json"

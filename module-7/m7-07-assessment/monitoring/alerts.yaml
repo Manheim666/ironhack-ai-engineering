@@ -1,0 +1,183 @@
+# Alerting rules for the recommendations service (Scenario X).
+#
+# Prometheus-style rules. Three families:
+#   1) Multi-window burn-rate on the SLOs (latency + availability error budget).
+#   2) Model prediction drift.
+#   3) Model-version mismatch (serving vs registry champion).
+#
+# Every threshold here matches serving/slos.yaml and the canary gate in lifecycle/lifecycle.md on
+# purpose — we alert on exactly the conditions we refuse to promote into. The rollback runbook
+# (runbooks/rollback.md) triggers off these same alerts.
+#
+# SLO targets (from slos.yaml):
+#   availability  = 99.9%  -> error budget = 0.1%
+#   latency p95   <= 120 ms
+#   error rate    < 0.5% 5xx
+
+groups:
+
+  # -------------------------------------------------------------------------
+  # 1) Availability error-budget burn-rate (multi-window, multi-burn-rate).
+  #    Fast burn = budget gone soon -> page. Slow burn = chronic bleed -> ticket.
+  #    The classic 2-window pairs: short window confirms the long window so a brief
+  #    blip doesn't page, but a real burn does, fast.
+  # -------------------------------------------------------------------------
+  - name: slo-availability-burn
+    rules:
+
+      - alert: ErrorBudgetFastBurn
+        # 14.4x burn over 1h would exhaust a 30d budget in ~2 days. Confirmed by a 5m window.
+        expr: |
+          (
+            job:slo_error_ratio:rate1h{service="recommendations"} > (14.4 * 0.001)
+            and
+            job:slo_error_ratio:rate5m{service="recommendations"} > (14.4 * 0.001)
+          )
+        for: 2m
+        labels:
+          severity: page
+          slo: availability
+        annotations:
+          summary: "Fast error-budget burn (14.4x) on recommendations"
+          description: >
+            5xx/latency failures are burning the availability budget ~14.4x too fast (1h and 5m
+            windows both over threshold). At this rate the 30d budget is gone in ~2 days.
+          runbook: ../runbooks/rollback.md
+
+      - alert: ErrorBudgetSlowBurn
+        # 6x burn over 6h, confirmed by a 30m window. Chronic, not an emergency -> ticket.
+        expr: |
+          (
+            job:slo_error_ratio:rate6h{service="recommendations"} > (6 * 0.001)
+            and
+            job:slo_error_ratio:rate30m{service="recommendations"} > (6 * 0.001)
+          )
+        for: 15m
+        labels:
+          severity: ticket
+          slo: availability
+        annotations:
+          summary: "Slow error-budget burn (6x) on recommendations"
+          description: >
+            Sustained 6x burn over 6h (confirmed at 30m). Not page-worthy yet but the budget is
+            bleeding — investigate before it becomes a fast burn.
+          runbook: ../runbooks/rollback.md
+
+  # -------------------------------------------------------------------------
+  # 2) Latency SLO burn. p95 over 120 ms is itself a failure for a blocking call,
+  #    so we burn-rate it the same way as availability.
+  # -------------------------------------------------------------------------
+  - name: slo-latency-burn
+    rules:
+
+      - alert: LatencyFastBurn
+        expr: |
+          (
+            job:slo_latency_breach_ratio:rate1h{service="recommendations",endpoint="POST /v1/recommendations"} > (14.4 * 0.001)
+            and
+            job:slo_latency_breach_ratio:rate5m{service="recommendations",endpoint="POST /v1/recommendations"} > (14.4 * 0.001)
+          )
+        for: 2m
+        labels:
+          severity: page
+          slo: latency
+        annotations:
+          summary: "p95 latency budget (120 ms) burning fast"
+          description: >
+            The share of requests over the 120 ms p95 budget is burning error budget ~14.4x too fast.
+            Check feature-store/ANN latency and current model version.
+          runbook: ../runbooks/rollback.md
+
+      - alert: LatencySlowBurn
+        expr: |
+          (
+            job:slo_latency_breach_ratio:rate6h{service="recommendations",endpoint="POST /v1/recommendations"} > (6 * 0.001)
+            and
+            job:slo_latency_breach_ratio:rate30m{service="recommendations",endpoint="POST /v1/recommendations"} > (6 * 0.001)
+          )
+        for: 15m
+        labels:
+          severity: ticket
+          slo: latency
+        annotations:
+          summary: "p95 latency budget burning slowly"
+          description: "Sustained latency-budget burn over 6h. Investigate before it escalates."
+          runbook: ../runbooks/rollback.md
+
+  # -------------------------------------------------------------------------
+  # 3) Model prediction drift. PSI over the ranking-score distribution vs the trailing
+  #    baseline. Same psi_max = 0.2 as the canary gate and the quality SLO.
+  # -------------------------------------------------------------------------
+  - name: model-drift
+    rules:
+
+      - alert: PredictionScoreDrift
+        expr: model_prediction_score_psi{service="recommendations"} > 0.2
+        for: 30m
+        labels:
+          severity: ticket
+          slo: prediction-drift
+        annotations:
+          summary: "Ranking-score distribution drifting (PSI > 0.2)"
+          description: >
+            The served ranking-score distribution has drifted past PSI 0.2 vs baseline for 30m. Could
+            be upstream feature drift, a data pipeline change, or a genuinely different population.
+            Not necessarily a model bug — but worth a look, and a reason to hold any in-flight promotion.
+          runbook: ../runbooks/rollback.md
+
+      - alert: ColdStartRateSpike
+        # If cold-start share jumps, the feature store is probably stale/empty -> recs quietly degrade.
+        expr: |
+          job:cold_start_ratio:rate15m{service="recommendations"} > 0.25
+        for: 10m
+        labels:
+          severity: page
+          slo: prediction-drift
+        annotations:
+          summary: "Cold-start fallback rate spiking (>25%)"
+          description: >
+            More than 25% of requests are falling back to cold-start, well above the ~10% baseline.
+            Usually means the feature store is stale or unreachable — users are getting generic recs.
+          runbook: ../runbooks/rollback.md
+
+  # -------------------------------------------------------------------------
+  # 4) Model-version mismatch. The serving fleet should report the same model version the registry
+  #    marks as the production champion. Because the model is baked in (ADR-0001) and the tag scheme
+  #    is consistent end-to-end, a sustained mismatch is a REAL bug — a bad rollout, a stuck pod, or
+  #    a registry/serving disagreement. This is the alert the README "coherence" bullet calls for.
+  # -------------------------------------------------------------------------
+  - name: model-version
+    rules:
+
+      - alert: ModelVersionMismatch
+        # served_model_version is taken from the X-Model-Version header the pods emit.
+        # registry_champion_version is scraped from the model registry.
+        expr: |
+          count by (service) (
+            served_model_version{service="recommendations"}
+            unless on (service, version)
+            registry_champion_version{service="recommendations"}
+          ) > 0
+        for: 10m
+        labels:
+          severity: page
+          slo: model-freshness
+        annotations:
+          summary: "Serving model version != registry champion"
+          description: >
+            One or more pods are serving a model version that doesn't match the registry's production
+            champion (compared via the X-Model-Version header). Either a rollout is stuck/partial or
+            the wrong image is live. Check the rollout, expect to roll back to the known-good tag.
+          runbook: ../runbooks/rollback.md
+
+      - alert: MultipleModelVersionsServing
+        # During a normal rollout you briefly see 2 versions; >2, or 2 for too long, is a stuck deploy.
+        expr: count by (service) (count by (service, version) (served_model_version{service="recommendations"})) > 2
+        for: 15m
+        labels:
+          severity: ticket
+          slo: model-freshness
+        annotations:
+          summary: "More than two model versions serving simultaneously"
+          description: "A rollout looks stuck — more than two model versions live for over 15m."
+          runbook: ../runbooks/rollback.md

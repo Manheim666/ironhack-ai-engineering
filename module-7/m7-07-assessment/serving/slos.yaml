@@ -1,0 +1,65 @@
+# Service Level Objectives for the recommendations API (Scenario X).
+#
+# These are the numbers everything else commits to: the capacity plan sizes for them, the alerts in
+# monitoring/alerts.yaml fire when they're at risk, and the rollback runbook triggers off the same
+# thresholds. Keep them in sync — if one moves, they all move.
+
+service: retail-recommendations-api
+owner: recsys-serving-team
+window: 30d                     # rolling evaluation window for availability/error budget
+
+slos:
+
+  - name: latency
+    description: >
+      The home-screen synchronous endpoint stays fast. Measured end-to-end at the ingress, so it
+      includes feature fetch, retrieval, inference, and serialization — the same budget the capacity
+      plan and architecture diagram break down.
+    indicator: server_side_request_latency
+    endpoint: "POST /v1/recommendations"
+    objective:
+      percentile: 95
+      threshold_ms: 120          # matches architecture latency budget + capacity plan
+    # Secondary watch — not an SLO breach on its own, but it feeds the latency burn alert.
+    p99_watch_ms: 200
+
+  - name: availability
+    description: >
+      Successful responses over total. A request counts as failed if it returns 5xx or breaches the
+      latency threshold above (slow = bad for a blocking home-screen call).
+    indicator: success_ratio
+    objective:
+      target: 0.999              # 99.9% over 30 days
+    error_budget:
+      # 99.9% of 30d ≈ 43.2 minutes of full-outage-equivalent budget per window.
+      allowed_unavailability_minutes_30d: 43.2
+
+  - name: error_rate
+    description: 5xx responses stay rare.
+    indicator: error_ratio
+    objective:
+      max_5xx_ratio: 0.005       # < 0.5%
+
+# Prediction-quality objectives. Slower-moving, evaluated daily, not paged on the same way as the
+# latency/availability SLOs — but tracked so a quietly-degrading model gets caught.
+quality_slos:
+
+  - name: prediction-drift
+    description: >
+      The distribution of ranking scores shouldn't lurch versus the trailing baseline. PSI over the
+      score distribution. Same threshold the canary gate (lifecycle) and the drift alert use.
+    indicator: prediction_score_psi
+    objective:
+      psi_max: 0.2
+
+  - name: model-freshness
+    description: The serving model version matches what the registry marks as the production champion.
+    indicator: model_version_matches_registry_champion
+    objective:
+      mismatch_tolerance: 0      # any sustained mismatch is a problem — see version-mismatch alert
+
+# How the error budget gets spent / defended:
+# - Burn-rate alerts (monitoring/alerts.yaml) page when we're consuming budget too fast.
+# - The rollback runbook (runbooks/rollback.md) triggers off these exact thresholds.
+policy:
+  on_budget_exhaustion: "freeze risky deploys; prioritize reliability work until budget recovers"
